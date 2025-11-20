@@ -1,0 +1,49 @@
+name: Build with Buildpacks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Install Pack CLI
+      run: |
+        (curl -sSL "https://github.com/buildpacks/pack/releases/latest/download/pack-v$(curl -s https://api.github.com/repos/buildpacks/pack/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")' | cut -c2-)-linux.tgz" || curl -sSL "https://github.com/buildpacks/pack/releases/download/v0.35.1/pack-v0.35.1-linux.tgz") | tar -xz
+        sudo mv pack /usr/local/bin/
+    
+    - name: Build with Buildpacks
+      run: pack build buildpack-demo --builder paketobuildpacks/builder:base
+    
+    - name: Test container
+      run: |
+        docker run -d -p 3000:3000 --name test-app buildpack-demo
+        sleep 5
+        curl http://localhost:3000 || exit 1
+        docker stop test-app
+    
+    - name: Login to Docker Hub
+      if: github.ref == 'refs/heads/main' && env.DOCKER_USERNAME != ''
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Push to Docker Hub
+      if: github.ref == 'refs/heads/main' && env.DOCKER_USERNAME != ''
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      run: |
+        docker tag buildpack-demo ${{ secrets.DOCKER_USERNAME }}/buildpack-demo:latest
+        docker tag buildpack-demo ${{ secrets.DOCKER_USERNAME }}/buildpack-demo:${{ github.sha }}
+        docker push ${{ secrets.DOCKER_USERNAME }}/buildpack-demo:latest
+        docker push ${{ secrets.DOCKER_USERNAME }}/buildpack-demo:${{ github.sha }}
